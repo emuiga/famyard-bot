@@ -1,6 +1,7 @@
 # Famyard Bot
 
 WhatsApp bot for Famyard Enterprises, built with FastAPI and Supabase.
+Answers customer questions from a knowledge base using OpenAI embeddings for search and an Anthropic model for replies.
 
 ## Setup
 
@@ -19,8 +20,10 @@ uvicorn app.main:app --reload
 
 ## Seed knowledge base
 
-Run `supabase/migrations/001_knowledge_base.sql` in the Supabase SQL editor, then:
+Run the files in `supabase/migrations/` in order in the Supabase SQL editor, then:
 
 ```bash
 python -m scripts.seed_knowledge_base
 ```
+
+Re-run the seed after editing `data/famyard_knowledge_base.csv` to refresh rows and embeddings.
