@@ -13,6 +13,12 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
 MAX_MESSAGE_LENGTH = 2000
+# Media we can't read yet; reactions and system events are ignored silently
+UNSUPPORTED_TYPES = {"image", "audio", "video", "document", "sticker", "location", "contacts"}
+UNSUPPORTED_REPLY = (
+    "Sorry, I can only read text messages for now. Please type your question, "
+    "or call +254 119 222666 to speak with the Famyard team."
+)
 
 
 @router.get("", response_class=PlainTextResponse)
@@ -46,12 +52,13 @@ async def receive(request: Request, background_tasks: BackgroundTasks) -> dict:
     for entry in data.get("entry", []):
         for change in entry.get("changes", []):
             for message in change.get("value", {}).get("messages", []):
-                if message.get("type") != "text":
-                    continue
                 # Reply after returning 200 so Meta doesn't retry and cause duplicate replies
-                background_tasks.add_task(
-                    handle_message, message["id"], message["from"], message["text"]["body"]
-                )
+                if message.get("type") == "text":
+                    background_tasks.add_task(
+                        handle_message, message["id"], message["from"], message["text"]["body"]
+                    )
+                elif message.get("type") in UNSUPPORTED_TYPES:
+                    background_tasks.add_task(handle_unsupported, message["id"], message["from"])
     return {"status": "received"}
 
 
@@ -80,6 +87,11 @@ async def handle_message(message_id: str, sender: str, text: str) -> None:
         )
     except Exception:
         logger.exception("Failed to save history for %s", sender)
+
+
+async def handle_unsupported(message_id: str, sender: str) -> None:
+    if await dedupe.claim(message_id):
+        await _send(sender, UNSUPPORTED_REPLY)
 
 
 async def _send(to: str, body: str) -> None:
