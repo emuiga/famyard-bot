@@ -11,9 +11,9 @@ class Settings(BaseSettings):
     supabase_url: str = ""
     supabase_key: str = ""
 
-    openai_api_key: str = ""
+    gemini_api_key: str = ""
     # Must match the vector(N) column in supabase/migrations/002_knowledge_chunks.sql
-    embedding_model: str = "text-embedding-3-small"
+    embedding_model: str = "gemini-embedding-001"
     embedding_dimensions: int = 1536
 
     anthropic_api_key: str = ""

@@ -9,7 +9,7 @@ _SEPARATORS = [r"\n\s*\n", r"\n", r"(?<=[.!?])\s+", r"\s+"]
 
 @lru_cache
 def _encoding() -> tiktoken.Encoding:
-    # cl100k_base is the tokenizer used by text-embedding-3-*
+    # cl100k_base approximates token counts for any embedding model
     return tiktoken.get_encoding("cl100k_base")
 
 

@@ -1,7 +1,7 @@
 # Famyard Bot
 
 WhatsApp bot for Famyard Enterprises, built with FastAPI and Supabase.
-Answers customer questions from a knowledge base using OpenAI embeddings for search and an Anthropic model for replies.
+Answers customer questions from a knowledge base using Gemini embeddings for search and an Anthropic model for replies.
 
 ## Setup
 

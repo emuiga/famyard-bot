@@ -8,7 +8,7 @@ create table if not exists knowledge_chunks (
     chunk_index int not null,
     content text not null,
     token_count int not null,
-    -- Must match EMBEDDING_DIMENSIONS (text-embedding-3-small = 1536)
+    -- Must match EMBEDDING_DIMENSIONS (gemini-embedding-001 at 1536)
     embedding extensions.vector(1536) not null,
     created_at timestamptz not null default now(),
     unique (kb_id, chunk_index)

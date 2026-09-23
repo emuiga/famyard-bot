@@ -2,13 +2,13 @@ import asyncio
 
 from app.core.config import get_settings
 from app.db.supabase import get_supabase
-from app.services.embeddings import embed_text
+from app.services.embeddings import embed_query
 
 
 async def search(query: str) -> list[dict]:
     """Return knowledge chunks most similar to the query."""
     settings = get_settings()
-    embedding = await embed_text(query)
+    embedding = await embed_query(query)
     # supabase-py is sync; keep it off the event loop
     resp = await asyncio.to_thread(
         lambda: get_supabase()
