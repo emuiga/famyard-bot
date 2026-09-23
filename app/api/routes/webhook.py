@@ -7,7 +7,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
 from app.core.config import get_settings
-from app.services import assistant, memory, whatsapp
+from app.services import assistant, dedupe, memory, whatsapp
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhook", tags=["webhook"])
@@ -49,11 +49,16 @@ async def receive(request: Request, background_tasks: BackgroundTasks) -> dict:
                 if message.get("type") != "text":
                     continue
                 # Reply after returning 200 so Meta doesn't retry and cause duplicate replies
-                background_tasks.add_task(handle_message, message["from"], message["text"]["body"])
+                background_tasks.add_task(
+                    handle_message, message["id"], message["from"], message["text"]["body"]
+                )
     return {"status": "received"}
 
 
-async def handle_message(sender: str, text: str) -> None:
+async def handle_message(message_id: str, sender: str, text: str) -> None:
+    if not await dedupe.claim(message_id):
+        logger.info("Skipping duplicate message %s", message_id)
+        return
     logger.info("Message from %s: %s", sender, text)
     if len(text) > MAX_MESSAGE_LENGTH:
         await _send(sender, "Your message is a bit long. Please send a shorter question.")
