@@ -113,3 +113,28 @@ def test_reply_still_sent_when_history_fails(services):
     _post(_payload(_text("hi")))
     services["answer"].assert_awaited_once_with("hi", [])
     services["send_text"].assert_awaited_once()
+
+
+def test_sender_falls_back_to_contact_wa_id(services):
+    payload = {"entry": [{"changes": [{"value": {
+        "contacts": [{"wa_id": "254711111111", "profile": {"name": "A"}}],
+        "messages": [{"id": "wamid.4", "type": "text", "text": {"body": "hi"}}],
+    }}]}]}
+    _post(payload)
+    services["send_text"].assert_awaited_once_with("254711111111", "Reply")
+
+
+def test_message_with_only_user_id_is_not_answered_or_errored(services):
+    payload = {"entry": [{"changes": [{"value": {
+        "contacts": [{"user_id": "KE.123", "profile": {"name": "A"}}],
+        "messages": [{"id": "wamid.5", "from_user_id": "KE.123", "type": "text", "text": {"body": "hi"}}],
+    }}]}]}
+    with (
+        patch.object(webhook, "PHONE_COPY_WAIT_SECONDS", 0),
+        patch.object(webhook.dedupe, "is_processed", AsyncMock(return_value=True)) as is_processed,
+    ):
+        assert _post(payload).status_code == 200
+    is_processed.assert_awaited_once_with("wamid.5")
+    services["claim"].assert_not_called()
+    services["answer"].assert_not_called()
+    services["send_text"].assert_not_called()

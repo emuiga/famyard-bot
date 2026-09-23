@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import hmac
 import json
@@ -13,6 +14,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
 MAX_MESSAGE_LENGTH = 2000
+# Wait for the phone-number copy of a message before flagging a username-only copy
+PHONE_COPY_WAIT_SECONDS = 10
+
 # Media we can't read yet; reactions and system events are ignored silently
 UNSUPPORTED_TYPES = {"image", "audio", "video", "document", "sticker", "location", "contacts"}
 UNSUPPORTED_REPLY = (
@@ -51,15 +55,31 @@ async def receive(request: Request, background_tasks: BackgroundTasks) -> dict:
     data = json.loads(body)
     for entry in data.get("entry", []):
         for change in entry.get("changes", []):
-            for message in change.get("value", {}).get("messages", []):
+            value = change.get("value", {})
+            for message in value.get("messages", []):
+                if "id" not in message:
+                    continue
+                sender = _sender(message, value)
+                if not sender:
+                    # Never fail the request: Meta would keep retrying the whole batch
+                    background_tasks.add_task(handle_without_phone, message["id"], message.get("type"))
+                    continue
                 # Reply after returning 200 so Meta doesn't retry and cause duplicate replies
                 if message.get("type") == "text":
                     background_tasks.add_task(
-                        handle_message, message["id"], message["from"], message["text"]["body"]
+                        handle_message, message["id"], sender, message.get("text", {}).get("body", "")
                     )
                 elif message.get("type") in UNSUPPORTED_TYPES:
-                    background_tasks.add_task(handle_unsupported, message["id"], message["from"])
+                    background_tasks.add_task(handle_unsupported, message["id"], sender)
     return {"status": "received"}
+
+
+def _sender(message: dict, value: dict) -> str | None:
+    """WhatsApp id to reply to: the message's `from`, else the matching contact's `wa_id`."""
+    if message.get("from"):
+        return message["from"]
+    contacts = value.get("contacts") or []
+    return contacts[0].get("wa_id") if len(contacts) == 1 else None
 
 
 async def handle_message(message_id: str, sender: str, text: str) -> None:
@@ -87,6 +107,23 @@ async def handle_message(message_id: str, sender: str, text: str) -> None:
         )
     except Exception:
         logger.exception("Failed to save history for %s", sender)
+
+
+async def handle_without_phone(message_id: str, message_type: str | None) -> None:
+    """Meta may also deliver a copy keyed only by a username-style user id (from_user_id).
+
+    Don't claim the id: the copy with the phone number may arrive after this one.
+    """
+    await asyncio.sleep(PHONE_COPY_WAIT_SECONDS)
+    try:
+        handled = await dedupe.is_processed(message_id)
+    except Exception:
+        logger.exception("Failed to check message %s", message_id)
+        return
+    if handled:
+        logger.info("Skipping copy of message %s without phone number", message_id)
+    else:
+        logger.warning("Unanswered %s message %s: sender has no phone number", message_type, message_id)
 
 
 async def handle_unsupported(message_id: str, sender: str) -> None:
