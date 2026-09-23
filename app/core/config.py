@@ -23,7 +23,8 @@ class Settings(BaseSettings):
     chunk_max_tokens: int = 400
     chunk_overlap_tokens: int = 50
     match_count: int = 5
-    match_threshold: float = 0.3
+    # Measured: real questions score 0.66+, off-topic 0.56 or less
+    match_threshold: float = 0.6
 
     # Conversation memory: recent messages within the window are sent with each reply
     history_max_messages: int = 10
