@@ -21,4 +21,6 @@ async def send_text(to: str, body: str) -> None:
                 "text": {"body": part},
             }
             resp = await client.post(url, json=payload, headers=headers)
-            resp.raise_for_status()
+            if resp.is_error:
+                # Meta explains the failure in the body (e.g. recipient not allowed, token expired)
+                raise RuntimeError(f"WhatsApp send failed ({resp.status_code}): {resp.text}")
