@@ -29,6 +29,8 @@ def format_context(matches: list[dict]) -> str:
     blocks = []
     for m in matches:
         block = f"[{m['kb_id']}] {m['title']}\n{m['content']}"
+        if m.get("source_url"):
+            block += f"\nLink: {m['source_url']}"
         if m.get("needs_verification"):
             block += f"\n(Unverified: {m['needs_verification']})"
         blocks.append(block)

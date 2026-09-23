@@ -65,3 +65,12 @@ def test_format_context_marks_unverified():
         [{"kb_id": "FY-002", "title": "Stats", "content": "1,200+ sales", "needs_verification": "conflicting"}]
     )
     assert "(Unverified: conflicting)" in context
+
+
+def test_format_context_includes_links_when_present():
+    context = knowledge.format_context([
+        {"kb_id": "FY-062", "title": "Nanyuki", "content": "Plots", "source_url": "https://famyard.co.ke/nanyuki/"},
+        {"kb_id": "FY-001", "title": "About", "content": "Company"},
+    ])
+    assert "Link: https://famyard.co.ke/nanyuki/" in context
+    assert context.count("Link:") == 1
