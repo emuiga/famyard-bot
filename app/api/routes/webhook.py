@@ -4,7 +4,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
 from app.core.config import get_settings
-from app.services import assistant, whatsapp
+from app.services import assistant, memory, whatsapp
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhook", tags=["webhook"])
@@ -39,10 +39,29 @@ async def receive(request: Request, background_tasks: BackgroundTasks) -> dict:
 async def handle_message(sender: str, text: str) -> None:
     logger.info("Message from %s: %s", sender, text)
     if len(text) > MAX_MESSAGE_LENGTH:
-        reply = "Your message is a bit long. Please send a shorter question."
-    else:
-        reply = await assistant.answer(text)
+        await _send(sender, "Your message is a bit long. Please send a shorter question.")
+        return
+
     try:
-        await whatsapp.send_text(sender, reply)
+        history = await memory.get_history(sender)
     except Exception:
-        logger.exception("Failed to send reply to %s", sender)
+        logger.exception("Failed to load history for %s", sender)
+        history = []
+
+    reply = await assistant.answer(text, history)
+    await _send(sender, reply)
+
+    try:
+        await memory.save_messages(
+            sender,
+            [{"role": "user", "content": text}, {"role": "assistant", "content": reply}],
+        )
+    except Exception:
+        logger.exception("Failed to save history for %s", sender)
+
+
+async def _send(to: str, body: str) -> None:
+    try:
+        await whatsapp.send_text(to, body)
+    except Exception:
+        logger.exception("Failed to send reply to %s", to)
