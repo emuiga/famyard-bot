@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     whatsapp_verify_token: str = ""
     # App secret from Meta App Dashboard > App settings > Basic; used to verify webhook signatures
     whatsapp_app_secret: str = ""
-    whatsapp_api_version: str = "v21.0"
+    whatsapp_api_version: str = "v25.0"
 
 
 @lru_cache
