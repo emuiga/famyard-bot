@@ -69,5 +69,7 @@ async def answer(question: str, history: list[dict] | None = None) -> str:
 
     if response.stop_reason == "refusal":
         return FALLBACK_REPLY
+    if response.stop_reason == "max_tokens":
+        logger.warning("Reply hit max_tokens (%s) and may be cut off", settings.llm_max_tokens)
     text = "".join(b.text for b in response.content if b.type == "text").strip()
     return to_whatsapp(text) if text else FALLBACK_REPLY
