@@ -1,13 +1,15 @@
 import logging
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 
 from app.core.config import get_settings
-from app.services import whatsapp
+from app.services import assistant, whatsapp
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhook", tags=["webhook"])
+
+MAX_MESSAGE_LENGTH = 2000
 
 
 @router.get("", response_class=PlainTextResponse)
@@ -22,16 +24,25 @@ def verify(
 
 
 @router.post("")
-async def receive(request: Request) -> dict:
+async def receive(request: Request, background_tasks: BackgroundTasks) -> dict:
     data = await request.json()
     for entry in data.get("entry", []):
         for change in entry.get("changes", []):
             for message in change.get("value", {}).get("messages", []):
                 if message.get("type") != "text":
                     continue
-                sender = message["from"]
-                text = message["text"]["body"]
-                logger.info("Message from %s: %s", sender, text)
-                # TODO: replace echo with knowledge base lookup
-                await whatsapp.send_text(sender, f"You said: {text}")
+                # Reply after returning 200 so Meta doesn't retry and cause duplicate replies
+                background_tasks.add_task(handle_message, message["from"], message["text"]["body"])
     return {"status": "received"}
+
+
+async def handle_message(sender: str, text: str) -> None:
+    logger.info("Message from %s: %s", sender, text)
+    if len(text) > MAX_MESSAGE_LENGTH:
+        reply = "Your message is a bit long. Please send a shorter question."
+    else:
+        reply = await assistant.answer(text)
+    try:
+        await whatsapp.send_text(sender, reply)
+    except Exception:
+        logger.exception("Failed to send reply to %s", sender)
