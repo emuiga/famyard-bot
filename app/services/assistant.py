@@ -5,6 +5,7 @@ import anthropic
 
 from app.core.config import get_settings
 from app.services import knowledge
+from app.utils.formatting import to_whatsapp
 
 logger = logging.getLogger(__name__)
 
@@ -55,4 +56,4 @@ async def answer(question: str) -> str:
     if response.stop_reason == "refusal":
         return FALLBACK_REPLY
     text = "".join(b.text for b in response.content if b.type == "text").strip()
-    return text or FALLBACK_REPLY
+    return to_whatsapp(text) if text else FALLBACK_REPLY
