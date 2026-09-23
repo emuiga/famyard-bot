@@ -18,3 +18,5 @@ create table if not exists knowledge_base (
 );
 
 create index if not exists knowledge_base_category_idx on knowledge_base (category);
+
+alter table knowledge_base enable row level security;
