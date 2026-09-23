@@ -169,3 +169,9 @@ def test_message_without_any_sender_is_skipped(services):
     }}]}]}
     assert _post(payload).status_code == 200
     services["claim"].assert_not_called()
+
+
+def test_undelivered_reply_is_not_saved(services):
+    services["send_text"].side_effect = RuntimeError("not allowed")
+    _post(_payload(_text("hi")))
+    services["save_messages"].assert_awaited_once_with("254700000000", [{"role": "user", "content": "hi"}])

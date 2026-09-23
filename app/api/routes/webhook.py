@@ -113,13 +113,13 @@ async def handle_message(key: str, sender: Sender, text: str) -> None:
         history = []
 
     reply = await assistant.answer(text, history)
-    await _send(sender, reply)
+    messages = [{"role": "user", "content": text}]
+    # Only remember replies the customer actually received
+    if await _send(sender, reply):
+        messages.append({"role": "assistant", "content": reply})
 
     try:
-        await memory.save_messages(
-            sender.user_key,
-            [{"role": "user", "content": text}, {"role": "assistant", "content": reply}],
-        )
+        await memory.save_messages(sender.user_key, messages)
     except Exception:
         logger.exception("Failed to save history for %s", sender.user_key)
 
@@ -129,8 +129,10 @@ async def handle_unsupported(key: str, sender: Sender) -> None:
         await _send(sender, UNSUPPORTED_REPLY)
 
 
-async def _send(sender: Sender, body: str) -> None:
+async def _send(sender: Sender, body: str) -> bool:
     try:
         await whatsapp.send_text(sender.reply_to, body)
+        return True
     except Exception:
         logger.exception("Failed to send reply to %s", sender.reply_to)
+        return False
