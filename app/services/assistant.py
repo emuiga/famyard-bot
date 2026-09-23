@@ -30,20 +30,32 @@ def _client() -> anthropic.AsyncAnthropic:
     return anthropic.AsyncAnthropic(api_key=get_settings().anthropic_api_key)
 
 
-async def answer(question: str) -> str:
+def _search_query(question: str, history: list[dict]) -> str:
+    """Include recent customer messages so follow-ups like "how much is it?" find the right entries."""
+    previous = [m["content"] for m in history if m["role"] == "user"][-2:]
+    return "\n".join([*previous, question])
+
+
+async def answer(question: str, history: list[dict] | None = None) -> str:
+    """Reply to a customer message. history is prior {role, content} messages, oldest first."""
     settings = get_settings()
+    history = list(history or [])
+    # Conversation must start with a customer message
+    while history and history[0]["role"] != "user":
+        history.pop(0)
     try:
-        matches = await knowledge.search(question)
+        matches = await knowledge.search(_search_query(question, history))
         response = await _client().messages.create(
             model=settings.llm_model,
             max_tokens=settings.llm_max_tokens,
             system=SYSTEM_PROMPT,
             messages=[
+                *({"role": m["role"], "content": m["content"]} for m in history),
                 {
                     "role": "user",
                     "content": f"<knowledge>\n{knowledge.format_context(matches)}\n</knowledge>\n\n"
                     f"Customer message: {question}",
-                }
+                },
             ],
         )
     except anthropic.APIStatusError as e:
