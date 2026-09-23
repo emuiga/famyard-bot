@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     match_count: int = 5
     match_threshold: float = 0.3
 
+    # Conversation memory: recent messages within the window are sent with each reply
+    history_max_messages: int = 10
+    history_window_hours: int = 24
+
     whatsapp_token: str = ""
     whatsapp_phone_number_id: str = ""
     whatsapp_verify_token: str = ""
