@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+import json
 import logging
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
@@ -23,9 +26,23 @@ def verify(
     raise HTTPException(status_code=403, detail="Verification failed")
 
 
+def _valid_signature(body: bytes, header: str | None) -> bool:
+    settings = get_settings()
+    if not settings.whatsapp_app_secret:
+        # Allow unsigned requests only for local development
+        return settings.app_env == "development"
+    if not header or not header.startswith("sha256="):
+        return False
+    expected = hmac.new(settings.whatsapp_app_secret.encode(), body, hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, header.removeprefix("sha256="))
+
+
 @router.post("")
 async def receive(request: Request, background_tasks: BackgroundTasks) -> dict:
-    data = await request.json()
+    body = await request.body()
+    if not _valid_signature(body, request.headers.get("X-Hub-Signature-256")):
+        raise HTTPException(status_code=401, detail="Invalid signature")
+    data = json.loads(body)
     for entry in data.get("entry", []):
         for change in entry.get("changes", []):
             for message in change.get("value", {}).get("messages", []):
