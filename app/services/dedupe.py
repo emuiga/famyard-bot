@@ -25,14 +25,3 @@ async def claim(message_id: str) -> bool:
         logger.exception("Failed to record message %s", message_id)
     return True
 
-
-async def is_processed(message_id: str) -> bool:
-    resp = await asyncio.to_thread(
-        lambda: get_supabase()
-        .table("processed_messages")
-        .select("message_id")
-        .eq("message_id", message_id)
-        .limit(1)
-        .execute()
-    )
-    return bool(resp.data)

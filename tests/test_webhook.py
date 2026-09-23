@@ -124,17 +124,48 @@ def test_sender_falls_back_to_contact_wa_id(services):
     services["send_text"].assert_awaited_once_with("254711111111", "Reply")
 
 
-def test_message_with_only_user_id_is_not_answered_or_errored(services):
+
+def test_message_with_only_user_id_is_answered_via_user_id(services):
     payload = {"entry": [{"changes": [{"value": {
         "contacts": [{"user_id": "KE.123", "profile": {"name": "A"}}],
-        "messages": [{"id": "wamid.5", "from_user_id": "KE.123", "type": "text", "text": {"body": "hi"}}],
+        "messages": [{"id": "wamid.5", "from_user_id": "KE.123", "timestamp": "1700000000",
+                      "type": "text", "text": {"body": "hi"}}],
     }}]}]}
-    with (
-        patch.object(webhook, "PHONE_COPY_WAIT_SECONDS", 0),
-        patch.object(webhook.dedupe, "is_processed", AsyncMock(return_value=True)) as is_processed,
-    ):
-        assert _post(payload).status_code == 200
-    is_processed.assert_awaited_once_with("wamid.5")
+    assert _post(payload).status_code == 200
+    services["send_text"].assert_awaited_once_with("KE.123", "Reply")
+    services["get_history"].assert_awaited_once_with("KE.123")
+
+
+def test_phone_is_preferred_for_replies_and_user_id_for_history(services):
+    payload = {"entry": [{"changes": [{"value": {
+        "contacts": [{"user_id": "KE.123", "wa_id": "254700000000", "profile": {"name": "A"}}],
+        "messages": [{"id": "wamid.6", "from": "254700000000", "from_user_id": "KE.123",
+                      "timestamp": "1700000000", "type": "text", "text": {"body": "hi"}}],
+    }}]}]}
+    _post(payload)
+    services["send_text"].assert_awaited_once_with("254700000000", "Reply")
+    services["get_history"].assert_awaited_once_with("KE.123")
+
+
+def test_copies_with_and_without_phone_share_a_dedupe_key(services):
+    base = {"timestamp": "1700000000", "type": "text", "text": {"body": "hi"}}
+    with_phone = {"entry": [{"changes": [{"value": {
+        "contacts": [{"user_id": "KE.123", "wa_id": "254700000000"}],
+        "messages": [{**base, "id": "wamid.A", "from": "254700000000", "from_user_id": "KE.123"}],
+    }}]}]}
+    without_phone = {"entry": [{"changes": [{"value": {
+        "contacts": [{"user_id": "KE.123"}],
+        "messages": [{**base, "id": "wamid.B", "from_user_id": "KE.123"}],
+    }}]}]}
+    _post(with_phone)
+    _post(without_phone)
+    keys = [c.args[0] for c in services["claim"].await_args_list]
+    assert len(keys) == 2 and keys[0] == keys[1]
+
+
+def test_message_without_any_sender_is_skipped(services):
+    payload = {"entry": [{"changes": [{"value": {
+        "messages": [{"id": "wamid.7", "type": "text", "text": {"body": "hi"}}],
+    }}]}]}
+    assert _post(payload).status_code == 200
     services["claim"].assert_not_called()
-    services["answer"].assert_not_called()
-    services["send_text"].assert_not_called()

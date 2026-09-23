@@ -1,8 +1,8 @@
-import asyncio
 import hashlib
 import hmac
 import json
 import logging
+from dataclasses import dataclass
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
@@ -14,9 +14,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/webhook", tags=["webhook"])
 
 MAX_MESSAGE_LENGTH = 2000
-# Wait for the phone-number copy of a message before flagging a username-only copy
-PHONE_COPY_WAIT_SECONDS = 10
-
 # Media we can't read yet; reactions and system events are ignored silently
 UNSUPPORTED_TYPES = {"image", "audio", "video", "document", "sticker", "location", "contacts"}
 UNSUPPORTED_REPLY = (
@@ -57,44 +54,62 @@ async def receive(request: Request, background_tasks: BackgroundTasks) -> dict:
         for change in entry.get("changes", []):
             value = change.get("value", {})
             for message in value.get("messages", []):
-                if "id" not in message:
-                    continue
                 sender = _sender(message, value)
                 if not sender:
                     # Never fail the request: Meta would keep retrying the whole batch
-                    background_tasks.add_task(handle_without_phone, message["id"], message.get("type"))
+                    logger.warning("Skipping message without sender: keys=%s", sorted(message))
                     continue
+                key = _dedupe_key(message, sender)
                 # Reply after returning 200 so Meta doesn't retry and cause duplicate replies
                 if message.get("type") == "text":
                     background_tasks.add_task(
-                        handle_message, message["id"], sender, message.get("text", {}).get("body", "")
+                        handle_message, key, sender, message.get("text", {}).get("body", "")
                     )
                 elif message.get("type") in UNSUPPORTED_TYPES:
-                    background_tasks.add_task(handle_unsupported, message["id"], sender)
+                    background_tasks.add_task(handle_unsupported, key, sender)
     return {"status": "received"}
 
 
-def _sender(message: dict, value: dict) -> str | None:
-    """WhatsApp id to reply to: the message's `from`, else the matching contact's `wa_id`."""
-    if message.get("from"):
-        return message["from"]
+@dataclass(frozen=True)
+class Sender:
+    reply_to: str  # phone number when Meta provides one, else the business-scoped user id
+    user_key: str  # stable id for conversation history: the business-scoped user id when present
+
+
+def _sender(message: dict, value: dict) -> Sender | None:
     contacts = value.get("contacts") or []
-    return contacts[0].get("wa_id") if len(contacts) == 1 else None
+    contact = contacts[0] if len(contacts) == 1 else {}
+    phone = message.get("from") or contact.get("wa_id")
+    # Business-scoped user id: always sent, even when the phone number is withheld
+    user_id = message.get("from_user_id") or contact.get("user_id")
+    if not (phone or user_id):
+        return None
+    return Sender(reply_to=phone or user_id, user_key=user_id or phone)
 
 
-async def handle_message(message_id: str, sender: str, text: str) -> None:
-    if not await dedupe.claim(message_id):
-        logger.info("Skipping duplicate message %s", message_id)
+def _dedupe_key(message: dict, sender: Sender) -> str:
+    """Meta can deliver one message twice with different ids (with and without the phone number),
+    so identify it by sender, timestamp and content instead."""
+    if not message.get("timestamp"):
+        return message.get("id", "")
+    content = json.dumps(message.get(message.get("type", ""), {}), sort_keys=True)
+    digest = hashlib.sha256(content.encode()).hexdigest()[:16]
+    return f"{sender.user_key}:{message['timestamp']}:{digest}"
+
+
+async def handle_message(key: str, sender: Sender, text: str) -> None:
+    if not await dedupe.claim(key):
+        logger.info("Skipping duplicate message %s", key)
         return
-    logger.info("Message from %s: %s", sender, text)
+    logger.info("Message from %s: %s", sender.reply_to, text)
     if len(text) > MAX_MESSAGE_LENGTH:
         await _send(sender, "Your message is a bit long. Please send a shorter question.")
         return
 
     try:
-        history = await memory.get_history(sender)
+        history = await memory.get_history(sender.user_key)
     except Exception:
-        logger.exception("Failed to load history for %s", sender)
+        logger.exception("Failed to load history for %s", sender.user_key)
         history = []
 
     reply = await assistant.answer(text, history)
@@ -102,37 +117,20 @@ async def handle_message(message_id: str, sender: str, text: str) -> None:
 
     try:
         await memory.save_messages(
-            sender,
+            sender.user_key,
             [{"role": "user", "content": text}, {"role": "assistant", "content": reply}],
         )
     except Exception:
-        logger.exception("Failed to save history for %s", sender)
+        logger.exception("Failed to save history for %s", sender.user_key)
 
 
-async def handle_without_phone(message_id: str, message_type: str | None) -> None:
-    """Meta may also deliver a copy keyed only by a username-style user id (from_user_id).
-
-    Don't claim the id: the copy with the phone number may arrive after this one.
-    """
-    await asyncio.sleep(PHONE_COPY_WAIT_SECONDS)
-    try:
-        handled = await dedupe.is_processed(message_id)
-    except Exception:
-        logger.exception("Failed to check message %s", message_id)
-        return
-    if handled:
-        logger.info("Skipping copy of message %s without phone number", message_id)
-    else:
-        logger.warning("Unanswered %s message %s: sender has no phone number", message_type, message_id)
-
-
-async def handle_unsupported(message_id: str, sender: str) -> None:
-    if await dedupe.claim(message_id):
+async def handle_unsupported(key: str, sender: Sender) -> None:
+    if await dedupe.claim(key):
         await _send(sender, UNSUPPORTED_REPLY)
 
 
-async def _send(to: str, body: str) -> None:
+async def _send(sender: Sender, body: str) -> None:
     try:
-        await whatsapp.send_text(to, body)
+        await whatsapp.send_text(sender.reply_to, body)
     except Exception:
-        logger.exception("Failed to send reply to %s", to)
+        logger.exception("Failed to send reply to %s", sender.reply_to)
