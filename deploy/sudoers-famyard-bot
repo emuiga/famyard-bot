@@ -1,0 +1,2 @@
+# Lets ken restart and inspect the bot without a password (for deploys). Nothing else.
+ken ALL=(root) NOPASSWD: /usr/bin/systemctl restart famyard-bot, /usr/bin/systemctl status famyard-bot, /usr/bin/journalctl -u famyard-bot *
